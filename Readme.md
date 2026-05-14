@@ -196,4 +196,4 @@ Supabase 대시보드 → SQL Editor → schema.sql 실행
 
 <br>
 
-© 2025 박정현의 다섯손가락 (충남대학교). All rights reserved.
+© 2026 박정현의 다섯손가락 (충남대학교). All rights reserved.
