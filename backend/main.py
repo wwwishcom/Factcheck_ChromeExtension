@@ -87,6 +87,12 @@ def update_source_stats(domain: str, trust_score: int):
         print(f"[source update error] {e}")
 
 # ── RSS 크롤러 ────────────────────────────────────────────
+def extract_keywords_simple(text: str) -> str:
+    """제목에서 핵심 키워드 추출 (2글자 이상 명사)"""
+    tokens = re.findall(r'[가-힣A-Za-z]{2,}', text)
+    stops = {'하는','하고','했다','한다','있는','있다','없다','됩니다','합니다','것으로','관련','대한','이후'}
+    return ' '.join([t for t in tokens if t not in stops][:8])
+
 async def crawl_rss():
     print(f"[크롤러] RSS 수집 시작 {datetime.now().strftime('%H:%M:%S')}")
     total = 0
@@ -100,15 +106,38 @@ async def crawl_rss():
                 pub     = entry.get("published", "") or entry.get("updated", "")
                 if not title or not url:
                     continue
-                # insert 시도, 중복이면 무시
+
+                kw = extract_keywords_simple(title)
+
+                # 유사 기사 이미 있는지 확인 (제목 첫 키워드로 검색)
+                first_kw = kw.split()[0] if kw.split() else title[:10]
+                try:
+                    existing = supabase.table("news_cache")\
+                        .select("id, confirmed_count")\
+                        .ilike("title", f"%{first_kw}%")\
+                        .neq("url", url)\
+                        .limit(1).execute()
+
+                    if existing.data:
+                        # 유사 기사 발견 → confirmed_count 증가
+                        row = existing.data[0]
+                        supabase.table("news_cache").update({
+                            "confirmed_count": (row.get("confirmed_count") or 1) + 1
+                        }).eq("id", row["id"]).execute()
+                except Exception:
+                    pass
+
+                # 새 기사 insert
                 try:
                     supabase.table("news_cache").insert({
-                        "url":         url,
-                        "title":       title[:300],
-                        "description": summary[:500],
-                        "source":      feed_info["source"],
-                        "pub_date":    pub,
-                        "query":       "",
+                        "url":             url,
+                        "title":           title[:300],
+                        "description":     summary[:500],
+                        "source":          feed_info["source"],
+                        "pub_date":        pub,
+                        "query":           "",
+                        "keywords":        kw,
+                        "confirmed_count": 1,
                     }).execute()
                     total += 1
                 except Exception:
@@ -146,6 +175,12 @@ class AnalyzeRequest(BaseModel):
 
 class SimilarRequest(BaseModel):
     title: str
+    keywords: List[str] = []
+
+class Verify5WRequest(BaseModel):
+    title: str
+    body: str
+    pub_date: str = ""   # 기사 발행일 (페이지에서 추출)
     keywords: List[str] = []
 
 # ════════════════════════════════════════════════════════
@@ -194,6 +229,7 @@ async def analyze_article(req: AnalyzeRequest):
 반환 형식:
 {{
   "summary": "2~3문장 핵심 요약 (한국어)",
+  "score_reason": "이 기사의 신뢰도를 한두 문장으로 평가 (제목-본문 일치도, 근거 명확성, 출처 신뢰성 관점에서)",
   "terms": [{{"term": "전문용어", "explanation": "한 줄 설명"}}],
   "economic_indicators": [{{"name": "지표명", "value": "수치/상태", "context": "맥락"}}],
   "fact_claims": ["검증 필요한 핵심 주장1", "주장2", "주장3"],
@@ -201,6 +237,7 @@ async def analyze_article(req: AnalyzeRequest):
 }}
 
 규칙:
+- score_reason: 반드시 작성, 2문장 이내
 - terms: 독자가 모를 전문용어 최대 4개, 없으면 []
 - economic_indicators: 경제 지표 없으면 []
 - fact_claims: 최대 3개
@@ -354,3 +391,161 @@ async def news_stats():
         return {"ok": True, "total": len(rows.data), "by_source": source_counts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── 8. 육하원칙 DB 대조 검증 ─────────────────────────────
+@app.post("/api/verify5w")
+async def verify_5w(req: Verify5WRequest):
+    """
+    1. DB에서 같은 날짜 + 키워드 유사 기사 검색
+    2. 있으면 → DB 대조 방식으로 육하원칙 검증
+    3. 없으면 → 정규식 패턴 매칭 + 최신 기사 안내
+    """
+    keyword = req.keywords[0] if req.keywords else req.title[:20]
+    pub_date_display = ""
+
+    # 발행일 파싱 (다양한 포맷 대응)
+    if req.pub_date:
+        for fmt in ["%Y.%m.%d", "%Y-%m-%d", "%Y/%m/%d",
+                    "%a, %d %b %Y %H:%M:%S %z", "%Y-%m-%dT%H:%M:%S"]:
+            try:
+                dt = datetime.strptime(req.pub_date[:25], fmt)
+                pub_date_display = dt.strftime("%Y.%m.%d")
+                break
+            except:
+                continue
+        if not pub_date_display:
+            pub_date_display = req.pub_date[:10]
+
+    # DB에서 유사 기사 검색
+    db_articles = []
+    try:
+        res = supabase.table("news_cache")\
+            .select("title, description, source, pub_date")\
+            .ilike("title", f"%{keyword}%")\
+            .order("created_at", desc=True)\
+            .limit(5)\
+            .execute()
+        db_articles = res.data or []
+    except Exception as e:
+        print(f"[verify5w DB 오류] {e}")
+
+    # ── DB 대조 방식 ──
+    if db_articles:
+        # DB 기사들의 내용을 합쳐서 육하원칙 요소 추출
+        db_text = " ".join([a.get("title","") + " " + a.get("description","") for a in db_articles])
+        prompt = f"""다음 두 텍스트를 비교해 육하원칙 6항목의 일치 여부를 분석하세요.
+JSON만 반환하세요.
+
+분석 대상 기사:
+제목: {req.title}
+본문: {req.body[:800]}
+
+DB 유사 기사:
+{db_text[:800]}
+
+반환 형식:
+{{
+  "who":   {{"match": true/false, "article": "추출값", "db": "DB값", "note": "일치/불일치 이유"}},
+  "what":  {{"match": true/false, "article": "추출값", "db": "DB값", "note": ""}},
+  "when":  {{"match": true/false, "article": "추출값", "db": "DB값", "note": ""}},
+  "where": {{"match": true/false, "article": "추출값", "db": "DB값", "note": ""}},
+  "why":   {{"match": true/false, "article": "추출값", "db": "DB값", "note": ""}},
+  "how":   {{"match": true/false, "article": "추출값", "db": "DB값", "note": ""}}
+}}
+
+규칙: 항목을 찾을 수 없으면 match=false, 값은 빈 문자열."""
+
+        try:
+            text = call_llm(prompt)
+            comparison = parse_json_safe(text)
+        except Exception as e:
+            print(f"[verify5w LLM 오류] {e}")
+            comparison = {}
+
+        matched = sum(1 for v in comparison.values() if isinstance(v, dict) and v.get("match"))
+
+        return {
+            "ok": True,
+            "method": "db",
+            "pub_date": pub_date_display,
+            "db_count": len(db_articles),
+            "db_sources": list({a.get("source","") for a in db_articles}),
+            "matched": matched,
+            "total": 6,
+            "comparison": comparison
+        }
+
+    # ── 정규식 패턴 매칭 방식 (DB 없을 때) ──
+    else:
+        return {
+            "ok": True,
+            "method": "pattern",
+            "pub_date": pub_date_display,
+            "db_count": 0,
+            "db_sources": [],
+            "matched": None,
+            "total": 6,
+            "comparison": {},
+            "reason": f"{'최신 기사 (' + pub_date_display + ') — ' if pub_date_display else ''}DB에 등록되지 않은 기사입니다. 정규식 패턴 매칭으로 분석합니다."
+        }
+
+
+# ── 9. DB 신뢰도 매칭 점수 ───────────────────────────────
+class DbMatchRequest(BaseModel):
+    title: str
+    keywords: List[str] = []
+    pub_date: str = ""
+
+@app.post("/api/db_match")
+async def db_match(req: DbMatchRequest):
+    """
+    신뢰도 있는 언론사 DB와 대조해 신뢰도 점수 산출
+    - 매칭 있음: DB 일치율 기반 점수 (최대 100)
+    - 매칭 없음: 최신 기사 판정, 최대 70점 상한 적용
+    """
+    keyword = req.keywords[0] if req.keywords else req.title[:20]
+
+    # DB에서 유사 기사 검색
+    db_articles = []
+    try:
+        res = supabase.table("news_cache")\
+            .select("title, source, confirmed_count, pub_date")\
+            .ilike("title", f"%{keyword}%")\
+            .order("confirmed_count", desc=True)\
+            .limit(5).execute()
+        db_articles = res.data or []
+    except Exception as e:
+        print(f"[db_match 오류] {e}")
+
+    if db_articles:
+        # 확인된 언론사 수
+        sources = list({a.get("source","") for a in db_articles if a.get("source")})
+        source_count = len(sources)
+        # 가장 높은 confirmed_count
+        max_confirmed = max(a.get("confirmed_count") or 1 for a in db_articles)
+
+        # 점수 계산: 기본 50 + 언론사 수 보너스 + 중복 확인 보너스
+        db_score = min(100, 50 + (source_count * 15) + min(max_confirmed * 5, 20))
+
+        return {
+            "ok": True,
+            "case": "matched",          # DB 매칭 케이스
+            "db_score": db_score,
+            "source_count": source_count,
+            "sources": sources,
+            "max_confirmed": max_confirmed,
+            "comment": None             # 주의 코멘트 없음
+        }
+    else:
+        # DB 미매칭 → 최대 70점 상한, 주의 코멘트
+        pub_display = req.pub_date[:10] if req.pub_date else ""
+        return {
+            "ok": True,
+            "case": "unmatched",        # DB 미매칭 케이스
+            "db_score": None,
+            "source_count": 0,
+            "sources": [],
+            "max_confirmed": 0,
+            "comment": f"{'최신 기사 (' + pub_display + ') — ' if pub_display else ''}신뢰도 높은 언론사에서 아직 확인되지 않은 기사입니다. 내용을 추가로 확인하는 것을 권장합니다."
+        }

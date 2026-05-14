@@ -23,6 +23,45 @@
     return p.length > 160 ? p.slice(0, 157) + '…' : p || body.slice(0, 150) + '…';
   }
 
+  function getPubDate() {
+    const metas = [
+      'meta[property="article:published_time"]',
+      'meta[name="pubdate"]',
+      'meta[name="publishdate"]',
+      'meta[name="article:published_time"]',
+      'meta[itemprop="datePublished"]',
+    ];
+    for (const s of metas) {
+      const el = document.querySelector(s);
+      if (el && el.content) return el.content;
+    }
+    for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const d = JSON.parse(s.textContent);
+        if (d.datePublished) return d.datePublished;
+      } catch(e) {}
+    }
+    const body = document.body.innerText;
+    const m = body.match(/20\d{2}[.\-\/]\d{1,2}[.\-\/]\d{1,2}/);
+    if (m) return m[0];
+    return '';
+  }
+
+  function getDateWarning(pubDate) {
+    if (!pubDate) return null;
+    try {
+      const normalized = pubDate.replace(/\./g, '-').slice(0, 10);
+      const pub  = new Date(normalized);
+      const now  = new Date();
+      const days = Math.floor((now - pub) / (1000 * 60 * 60 * 24));
+      if (isNaN(days) || days < 0) return null;
+      if (days <= 7)   return null;
+      if (days <= 30)  return { level: 'info',  msg: '1개월 이내 기사입니다.' };
+      if (days <= 180) return { level: 'warn',  msg: '⚠ 6개월 이전 기사입니다. 내용이 변경되었을 수 있습니다.' };
+      return              { level: 'warn',  msg: '⚠ 오래된 기사입니다. 현재 상황과 다를 수 있습니다.' };
+    } catch(e) { return null; }
+  }
+
   // ============================================================
   //  B. 키워드 추출
   // ============================================================
@@ -94,18 +133,33 @@
   // ============================================================
   //  F. 종합 점수
   // ============================================================
-  function calcTrust(cb, kw, w5) {
+  function calcTrust(cb, kw, w5, dbScore = null) {
     const cbS = Math.max(0, 100 - cb.normalized);
     const kwS = kw.score;
     const cnt = Object.values(w5).filter(e => e.found).length;
     const w5S = Math.round((cnt / 6) * 100);
-    const total = Math.round(cbS * 0.25 + kwS * 0.35 + w5S * 0.40);
+
+    let total, caseType, comment;
+
+    if (dbScore !== null) {
+      // 케이스 1 — DB 매칭: db_score×50% + kw×30% + cb×20%
+      total    = Math.round(dbScore * 0.50 + kwS * 0.30 + cbS * 0.20);
+      caseType = 'matched';
+      comment  = null;
+    } else {
+      // 케이스 2 — DB 미매칭: kw×50% + cb×50%, 최대 70점
+      total    = Math.min(70, Math.round(kwS * 0.50 + cbS * 0.50));
+      caseType = 'unmatched';
+      comment  = '신뢰도 높은 언론사에서 아직 확인되지 않은 기사입니다. 추가 확인을 권장합니다.';
+    }
+
     let grade, color, fillColor;
-    if (total >= 80) { grade='신뢰 높음'; color='#16a34a'; fillColor='#4ade80'; }
-    else if (total >= 60) { grade='보통'; color='#b45309'; fillColor='#fbbf24'; }
+    if (total >= 80)      { grade='신뢰 높음'; color='#16a34a'; fillColor='#4ade80'; }
+    else if (total >= 60) { grade='보통';      color='#b45309'; fillColor='#fbbf24'; }
     else if (total >= 40) { grade='주의 필요'; color='#e67e22'; fillColor='#fb923c'; }
-    else { grade='신뢰 낮음'; color='#dc2626'; fillColor='#f87171'; }
-    return { total, grade, color, fillColor, cbS, kwS, w5S, cnt };
+    else                  { grade='신뢰 낮음'; color='#dc2626'; fillColor='#f87171'; }
+
+    return { total, grade, color, fillColor, cbS, kwS, w5S, cnt, caseType, comment };
   }
 
   // ============================================================
@@ -264,6 +318,7 @@
               <span class="ff-sec-arrow">▼</span>
             </div>
             <div class="ff-sec-body">
+              <div id="ff-b-w5-db"></div>
               <div class="ff-bar"><div class="ff-bar-fill ${w5c.bar}" style="width:${trust.w5S}%"></div></div>
               ${w5Html}
             </div>
@@ -406,36 +461,132 @@
     const cb          = calcClickbait(title);
     const kw          = calcKeywordMatch(title, body);
     const w5          = extract5W1H(title, body);
-    const trust       = calcTrust(cb, kw, w5);
+    const trust       = calcTrust(cb, kw, w5);  // 일단 DB 없이 초기 점수
     const bodyPreview = getBodyPreview(body);
     const bodyRaw     = body.slice(0, 3000);
+    const pubDate     = getPubDate();
+    const keywords    = extractKeywords(title).slice(0, 5).map(k => k.word);
 
-    renderBadge(title, cb, kw, w5, trust, bodyPreview);
+    renderBadge(title, cb, kw, w5, trust, bodyPreview, pubDate);
 
-    // LLM 비동기 분석 (배지용)
+    // DB 매칭 + LLM 비동기
     chrome.storage.local.get(['ff_api_key'], ({ ff_api_key }) => {
       if (!ff_api_key) {
-        // API 키 없으면 스켈레톤 → 안내 메시지로 교체
         const noKeyHtml = `<div style="font-size:10px;color:#8fa0b4;padding:4px 0">API 키를 설정하면 AI 분석이 활성화됩니다.</div>`;
-        ['#ff-b-summary','#ff-b-04','#ff-b-05'].forEach(sel => {
+        ['#ff-b-summary','#ff-b-05'].forEach(sel => {
           const el = document.querySelector(`#ff-trust-badge ${sel}`);
           if (el) el.innerHTML = noKeyHtml;
         });
-        return;
       }
-      chrome.runtime.sendMessage({ action: 'llm_analyze', title, body: bodyRaw }, (res) => {
-        if (res?.ok) applyLLMToBadge(res.data);
-        else {
-          const errHtml = `<div style="font-size:10px;color:#dc2626">⚠ ${res?.message||'분석 실패'}</div>`;
-          ['#ff-b-summary','#ff-b-04','#ff-b-05'].forEach(sel => {
-            const el = document.querySelector(`#ff-trust-badge ${sel}`);
-            if (el) el.innerHTML = errHtml;
-          });
+
+      // DB 매칭 점수 계산
+      chrome.runtime.sendMessage(
+        { action: 'db_match', title, keywords, pubDate },
+        (dbRes) => {
+          if (!dbRes?.ok) return;
+
+          const dbScore = dbRes.case === 'matched' ? dbRes.db_score : null;
+          const newTrust = calcTrust(cb, kw, w5, dbScore);
+
+          // 배지 점수 업데이트
+          updateBadgeScore(newTrust, dbRes, pubDate);
+
+          // LLM 분석
+          if (ff_api_key) {
+            chrome.runtime.sendMessage({ action: 'llm_analyze', title, body: bodyRaw }, (res) => {
+              if (res?.ok) applyLLMToBadge(res.data);
+            });
+          }
         }
-      });
+      );
+
+      // verify5w (01 섹션)
+      chrome.runtime.sendMessage(
+        { action: 'verify5w', title, body: bodyRaw, pubDate, keywords },
+        (res) => {
+          if (!res?.ok) return;
+          const el = document.querySelector('#ff-trust-badge #ff-b-w5-db');
+          if (!el) return;
+          if (res.method === 'db') {
+            el.innerHTML = `
+              <div style="font-size:10px;background:#eef2fb;border-radius:6px;padding:6px 8px;margin-bottom:6px;color:#003087">
+                DB 대조 완료 — ${res.db_sources.join(', ')} 등 ${res.db_count}건 비교
+                ${res.pub_date ? `<span style="color:#8fa0b4;margin-left:6px">${res.pub_date}</span>` : ''}
+              </div>
+              ${renderW5Comparison(res.comparison)}
+            `;
+          } else {
+            el.innerHTML = `<div style="font-size:10px;color:#b45309;background:#fffbeb;border-radius:6px;padding:6px 8px;margin-bottom:6px">${res.reason}</div>`;
+          }
+        }
+      );
     });
 
-    return { title, cb, kw, w5, trust, bodyPreview, bodyRaw };
+    return { title, cb, kw, w5, trust, bodyPreview, bodyRaw, pubDate };
+  }
+
+  function updateBadgeScore(trust, dbRes, pubDate) {
+    const badge = document.getElementById('ff-trust-badge');
+    if (!badge) return;
+
+    const numEl = badge.querySelector('.ff-batt-num');
+    if (numEl) numEl.textContent = trust.total;
+    const pctEl = badge.querySelector('.ff-batt-pct');
+    if (pctEl) pctEl.textContent = trust.total + '점';
+    const gradeEl = badge.querySelector('.ff-batt-grade');
+    if (gradeEl) gradeEl.textContent = trust.grade;
+    const fillEl = badge.querySelector('.ff-batt-fill');
+    if (fillEl) { fillEl.style.width = trust.total + '%'; fillEl.style.background = trust.fillColor; }
+
+    const cardBody = badge.querySelector('.ff-card-body');
+    if (!cardBody) return;
+
+    // 날짜 경고
+    const dateWarn = getDateWarning(pubDate);
+    if (dateWarn) {
+      let el = badge.querySelector('#ff-date-warn');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'ff-date-warn';
+        cardBody.insertBefore(el, cardBody.firstChild);
+      }
+      el.style.cssText = `font-size:10px;padding:6px 10px;margin-bottom:6px;border-radius:6px;line-height:1.5;
+        ${dateWarn.level === 'warn'
+          ? 'color:#b45309;background:#fffbeb;border:1px solid rgba(180,83,9,.15)'
+          : 'color:#4a607a;background:#f4f6fb;border:1px solid #e4e8f0'}`;
+      el.textContent = dateWarn.msg;
+    }
+
+    // DB 미매칭 주의 코멘트
+    if (trust.comment || dbRes?.comment) {
+      const msg = trust.comment || dbRes.comment;
+      let el = badge.querySelector('#ff-trust-comment');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'ff-trust-comment';
+        el.style.cssText = 'font-size:10px;color:#b45309;background:#fffbeb;border-radius:6px;padding:7px 10px;margin-bottom:6px;line-height:1.5;border:1px solid rgba(180,83,9,.15)';
+        cardBody.insertBefore(el, cardBody.firstChild);
+      }
+      el.textContent = '⚠ ' + msg;
+    }
+  }
+
+  function renderW5Comparison(comparison) {
+    const labels = { who:'누가', what:'무엇을', when:'언제', where:'어디서', why:'왜', how:'어떻게' };
+    return Object.entries(comparison).map(([key, v]) => {
+      if (!v || typeof v !== 'object') return '';
+      const color = v.match ? '#16a34a' : '#dc2626';
+      const bg    = v.match ? '#f0faf4' : '#fef2f2';
+      return `
+        <div style="padding:5px 0;border-bottom:1px solid #f5f5f3;font-size:10px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+            <span style="width:16px;height:16px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:8px;font-weight:700">${v.match?'✓':'✗'}</span>
+            <span style="font-weight:600;color:#4a607a;min-width:48px">${labels[key]||key}</span>
+            <span style="color:${color};font-weight:600">${v.match ? '일치' : '불일치'}</span>
+          </div>
+          ${v.note ? `<div style="color:#8fa0b4;padding-left:22px">${v.note}</div>` : ''}
+        </div>`;
+    }).join('');
   }
 
   if (isNewsPage()) setTimeout(analyze, 2000);

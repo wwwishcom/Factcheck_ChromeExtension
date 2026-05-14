@@ -62,6 +62,51 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // ── DB 신뢰도 매칭 → /api/db_match ─────────────────────
+  if (msg.action === "db_match") {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/db_match`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title:    msg.title    || "",
+            keywords: msg.keywords || [],
+            pub_date: msg.pubDate  || ""
+          })
+        });
+        const json = await res.json();
+        sendResponse({ ok: true, ...json });
+      } catch (e) {
+        sendResponse({ error: true, message: e.message });
+      }
+    })();
+    return true;
+  }
+
+  // ── 육하원칙 DB 대조 → /api/verify5w ────────────────────
+  if (msg.action === "verify5w") {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/verify5w`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title:    msg.title    || "",
+            body:     msg.body     || "",
+            pub_date: msg.pubDate  || "",
+            keywords: msg.keywords || []
+          })
+        });
+        const json = await res.json();
+        sendResponse({ ok: true, ...json });
+      } catch (e) {
+        sendResponse({ error: true, message: e.message });
+      }
+    })();
+    return true;
+  }
+
   // ── 출처 신뢰도 → /api/source ─────────────────────────
   if (msg.action === "get_source") {
     (async () => {

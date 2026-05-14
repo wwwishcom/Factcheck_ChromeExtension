@@ -71,6 +71,15 @@ function skeletonHTML(lines = 2) {
 
 // ── LLM 섹션 업데이트 ─────────────────────────────────
 function applyLLMData(llm) {
+  // 점수 풀이
+  const scoreEl = document.getElementById('ff-score-reason');
+  if (scoreEl) {
+    scoreEl.innerHTML = llm.score_reason
+      ? `<span style="color:#003087;font-weight:600;margin-right:4px">AI 평가</span>${llm.score_reason}`
+      : '';
+    if (!llm.score_reason) scoreEl.style.display = 'none';
+  }
+
   // 요약
   const sumEl = document.getElementById('ff-llm-summary');
   if (sumEl) sumEl.innerHTML = llm.summary
@@ -125,6 +134,21 @@ function applyLLMData(llm) {
 }
 
 // ── 메인 렌더 ─────────────────────────────────────────
+function getDateWarning(pubDate) {
+  if (!pubDate) return null;
+  try {
+    const normalized = pubDate.replace(/\./g, '-').slice(0, 10);
+    const pub  = new Date(normalized);
+    const now  = new Date();
+    const days = Math.floor((now - pub) / (1000 * 60 * 60 * 24));
+    if (isNaN(days) || days < 0) return null;
+    if (days <= 7)   return null;
+    if (days <= 30)  return { level: 'info', msg: '1개월 이내 기사입니다.' };
+    if (days <= 180) return { level: 'warn', msg: '⚠ 6개월 이전 기사입니다. 내용이 변경되었을 수 있습니다.' };
+    return              { level: 'warn', msg: '⚠ 오래된 기사입니다. 현재 상황과 다를 수 있습니다.' };
+  } catch(e) { return null; }
+}
+
 function renderResult(res, hasApiKey) {
   const el = document.getElementById('result');
   el.style.display = 'block';
@@ -144,6 +168,16 @@ function renderResult(res, hasApiKey) {
   const kwc  = ci(t.kwS);
   const cbc  = ci(t.cbS);
   const cbRc = ci(cb.normalized, true);
+
+  // 날짜 경고
+  const dateWarn = getDateWarning(res.pubDate);
+  const dateWarnHtml = dateWarn ? `
+    <div style="font-size:11px;padding:8px 11px;margin-bottom:8px;border-radius:8px;line-height:1.5;
+      ${dateWarn.level === 'warn'
+        ? 'color:#b45309;background:#fffbeb;border:1px solid rgba(180,83,9,.15)'
+        : 'color:#4a607a;background:#f4f6fb;border:1px solid #e4e8f0'}">
+      ${dateWarn.msg}
+    </div>` : '';
 
   const w5Html = Object.entries(w5).map(([, v]) => `
     <div class="w5r">
@@ -168,7 +202,9 @@ function renderResult(res, hasApiKey) {
 
   el.innerHTML = `
 
-    <!-- BATTERY HERO -->
+    ${dateWarnHtml}
+
+    <!-- BATTERY HERO + 점수 풀이 -->
     <div class="battery-hero">
       <div class="battery-top">
         <div class="battery-left">
@@ -186,6 +222,39 @@ function renderResult(res, hasApiKey) {
           <div class="battery-pct">${t.total}점</div>
         </div>
         <div class="battery-nub"></div>
+      </div>
+      <!-- 점수 산출 근거 -->
+      <div style="background:#fff;padding:12px 16px;border-top:1px solid #f0f0ee">
+        <div style="font-size:11px;font-weight:700;color:#003087;margin-bottom:8px;letter-spacing:0.3px">점수 산출 근거</div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <div style="display:flex;justify-content:space-between;font-size:12px">
+            <span style="color:#4a607a">DB 일치율 <span style="color:#8fa0b4;font-size:10px">× 50%</span></span>
+            <span style="font-weight:700;color:${w5c.c}">${t.w5S}점</span>
+          </div>
+          <div style="height:4px;background:#f0f0ee;border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${t.w5S}%;background:${w5c.c};border-radius:2px;transition:width 1s"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:2px">
+            <span style="color:#4a607a">키워드 매칭률 <span style="color:#8fa0b4;font-size:10px">× 30%</span></span>
+            <span style="font-weight:700;color:${kwc.c}">${t.kwS}점</span>
+          </div>
+          <div style="height:4px;background:#f0f0ee;border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${t.kwS}%;background:${kwc.c};border-radius:2px;transition:width 1s"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:2px">
+            <span style="color:#4a607a">클릭베이트 방어 <span style="color:#8fa0b4;font-size:10px">× 20%</span></span>
+            <span style="font-weight:700;color:${cbc.c}">${t.cbS}점</span>
+          </div>
+          <div style="height:4px;background:#f0f0ee;border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${t.cbS}%;background:${cbc.c};border-radius:2px;transition:width 1s"></div>
+          </div>
+        </div>
+        <div style="font-size:11px;color:#8fa0b4;text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid #f0f0ee">
+          ${t.w5S}×0.50 + ${t.kwS}×0.30 + ${t.cbS}×0.20 = <strong style="color:${tm.fillColor==='#4ade80'?'#16a34a':tm.fillColor}">${t.total}점</strong>
+          ${t.caseType === 'unmatched' ? '<span style="color:#b45309"> (최대 70점 상한 적용)</span>' : ''}
+        </div>
+        <!-- AI 점수 풀이 (LLM) -->
+        <div id="ff-score-reason" style="margin-top:8px;padding:8px 10px;background:#f8f9fc;border-radius:8px;font-size:12px;color:#4a607a;line-height:1.6">${skeletonHTML(2)}</div>
       </div>
     </div>
 
@@ -205,35 +274,17 @@ function renderResult(res, hasApiKey) {
         <span class="fc-arrow">▼</span>
       </div>
       <div class="fc-body">
+        <div id="ff-w5-db"></div>
         <div class="bar"><div class="bar-fill ${w5c.bar}" style="width:${t.w5S}%"></div></div>
-        <div class="sub-txt" style="margin-top:0;margin-bottom:6px">누가·무엇을·언제·어디서·왜·어떻게 — 6항목 자동 추출</div>
+        <div class="sub-txt" style="margin-top:0;margin-bottom:6px">6항목을 크롤링 DB와 자동 대조해 기사의 정보 충실도를 평가합니다.</div>
         ${w5Html}
-      </div>
-    </div>
-
-    <!-- 02 신뢰도 점수 -->
-    <div class="fc">
-      <div class="fc-head">
-        <span class="fc-num">02</span><span class="fc-icon">🎯</span>
-        <span class="fc-title">신뢰도 점수 즉시 표시</span>
-        <span class="fc-badge" style="background:rgba(0,48,135,.07);color:#003087;border-color:rgba(0,48,135,.2)">${t.total}점</span>
-        <span class="fc-arrow">▼</span>
-      </div>
-      <div class="fc-body">
-        <div class="sd-row"><span class="lbl">육하원칙 충족도<span class="wt">×40%</span></span><span class="val ${w5c.cls}">${t.w5S}점</span></div>
-        <div class="bar"><div class="bar-fill ${w5c.bar}" style="width:${t.w5S}%"></div></div>
-        <div class="sd-row"><span class="lbl">키워드 매칭률<span class="wt">×35%</span></span><span class="val ${kwc.cls}">${t.kwS}점</span></div>
-        <div class="bar"><div class="bar-fill ${kwc.bar}" style="width:${t.kwS}%"></div></div>
-        <div class="sd-row"><span class="lbl">클릭베이트 방어<span class="wt">×25%</span></span><span class="val ${cbc.cls}">${t.cbS}점</span></div>
-        <div class="bar"><div class="bar-fill ${cbc.bar}" style="width:${t.cbS}%"></div></div>
-        <div class="formula">${t.w5S}×0.40 + ${t.kwS}×0.35 + ${t.cbS}×0.25 = <strong style="color:${tm.fillColor==='#4ade80'?'#16a34a':tm.fillColor}">${t.total}점</strong></div>
       </div>
     </div>
 
     <!-- 03 클릭베이트 -->
     <div class="fc">
       <div class="fc-head">
-        <span class="fc-num">03</span><span class="fc-icon">🎣</span>
+        <span class="fc-num">02</span><span class="fc-icon">🎣</span>
         <span class="fc-title">클릭베이트 감지</span>
         <span class="fc-badge ${cbRc.badge}">${cb.reasons.length ? cb.reasons.length+'개 감지' : '이상 없음'}</span>
         <span class="fc-arrow">▼</span>
@@ -252,7 +303,7 @@ function renderResult(res, hasApiKey) {
     <!-- 04 유사 기사 비교 (네이버) -->
     <div class="fc">
       <div class="fc-head" data-section="04">
-        <span class="fc-num">04</span><span class="fc-icon">🔗</span>
+        <span class="fc-num">03</span><span class="fc-icon">🔗</span>
         <span class="fc-title">유사 기사 비교 · 출처 추적</span>
         <span class="fc-badge bdg-b">네이버</span>
         <span class="fc-arrow">▼</span>
@@ -266,7 +317,7 @@ function renderResult(res, hasApiKey) {
     <!-- 05 용어 풀이 (LLM) -->
     <div class="fc">
       <div class="fc-head">
-        <span class="fc-num">05</span><span class="fc-icon">📖</span>
+        <span class="fc-num">04</span><span class="fc-icon">📖</span>
         <span class="fc-title">용어 즉시 풀이 · 경제 지표 연동</span>
         <span class="fc-badge bdg-b">${hasApiKey ? 'AI' : '베타'}</span>
         <span class="fc-arrow">▼</span>
@@ -319,7 +370,6 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  // 1단계: 즉시 휴리스틱 분석
   chrome.tabs.sendMessage(tab.id, { action: 'analyze' }, async (res) => {
     btn.classList.remove('loading');
     btn.innerHTML = '<span>🔍</span> 다시 분석하기';
@@ -327,15 +377,37 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     const { ff_api_key } = await chrome.storage.local.get(['ff_api_key']);
     renderResult(res, !!ff_api_key);
 
-    // 2단계: LLM 분석 (API 키 있을 때만)
-    if (ff_api_key && res && !res.error) {
+    if (!res || res.error) return;
+
+    // verify5w — DB 대조 육하원칙 검증
+    chrome.runtime.sendMessage(
+      { action: 'verify5w', title: res.title, body: res.bodyRaw || '', pubDate: res.pubDate || '', keywords: res.kw?.matched?.slice(0,5) || [] },
+      (v5) => {
+        const el = document.getElementById('ff-w5-db');
+        if (!el || !v5?.ok) return;
+        if (v5.method === 'db') {
+          el.innerHTML = `
+            <div style="font-size:11px;background:#eef2fb;border-radius:7px;padding:7px 10px;margin-bottom:8px;color:#003087">
+              DB 대조 완료 — ${v5.db_sources.join(', ')} 등 ${v5.db_count}건 비교
+              ${v5.pub_date ? `<span style="color:#8fa0b4;margin-left:6px;font-size:10px">${v5.pub_date}</span>` : ''}
+            </div>
+            ${renderW5Compare(v5.comparison)}
+          `;
+        } else {
+          el.innerHTML = `<div style="font-size:11px;color:#b45309;background:#fffbeb;border-radius:7px;padding:7px 10px;margin-bottom:8px">${v5.reason || 'DB 미등록 기사입니다.'}</div>`;
+        }
+      }
+    );
+
+    // LLM 분석
+    if (ff_api_key) {
       chrome.runtime.sendMessage(
         { action: 'llm_analyze', title: res.title, body: res.bodyRaw || res.title },
         (llmRes) => {
           if (llmRes?.ok) applyLLMData(llmRes.data);
           else {
             const errHtml = `<div class="sub-txt" style="color:#dc2626">⚠ ${llmRes?.message || 'LLM 분석 실패'}</div>`;
-            ['ff-llm-summary','ff-llm-04','ff-llm-05'].forEach(id => {
+            ['ff-llm-summary','ff-llm-05'].forEach(id => {
               const el = document.getElementById(id);
               if (el) el.innerHTML = errHtml;
             });
@@ -345,3 +417,22 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     }
   });
 });
+
+function renderW5Compare(comparison) {
+  if (!comparison || !Object.keys(comparison).length) return '';
+  const labels = { who:'누가', what:'무엇을', when:'언제', where:'어디서', why:'왜', how:'어떻게' };
+  return Object.entries(comparison).map(([key, v]) => {
+    if (!v || typeof v !== 'object') return '';
+    const color = v.match ? '#16a34a' : '#dc2626';
+    const bg    = v.match ? '#f0faf4' : '#fef2f2';
+    return `
+      <div style="padding:5px 0;border-bottom:1px solid #f5f5f3;font-size:11px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+          <span style="width:17px;height:17px;border-radius:50%;background:${bg};color:${color};display:inline-flex;align-items:center;justify-content:center;font-size:8px;font-weight:700">${v.match?'✓':'✗'}</span>
+          <span style="font-weight:600;color:#4a607a;min-width:52px">${labels[key]||key}</span>
+          <span style="color:${color};font-weight:600">${v.match ? '일치' : '불일치'}</span>
+        </div>
+        ${v.note ? `<div style="color:#8fa0b4;font-size:10px;padding-left:23px">${v.note}</div>` : ''}
+      </div>`;
+  }).join('');
+}
