@@ -5,10 +5,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-import anthropic
 from openai import OpenAI
 from supabase import create_client, Client
-import os, json, re, traceback
+import os, json, re, traceback, httpx
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 
@@ -276,3 +275,108 @@ async def list_sources(limit: int = Query(default=20, le=100)):
         return {"ok": True, "data": res.data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── 6. 네이버 뉴스 검색 (유사 기사 DB) ───────────────────
+@app.get("/api/news/search")
+async def search_naver_news(
+    query: str = Query(..., description="검색어"),
+    display: int = Query(default=5, le=10)
+):
+    """네이버 뉴스 검색 API로 유사 기사 탐색 + Supabase에 저장"""
+    client_id     = os.getenv("NAVER_CLIENT_ID")
+    client_secret = os.getenv("NAVER_CLIENT_SECRET")
+
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="네이버 API 키가 설정되지 않았습니다.")
+
+    # 네이버 뉴스 검색 API 호출
+    async with httpx.AsyncClient() as http:
+        res = await http.get(
+            "https://openapi.naver.com/v1/search/news.json",
+            params={"query": query, "display": display, "sort": "date"},
+            headers={
+                "X-Naver-Client-Id":     client_id,
+                "X-Naver-Client-Secret": client_secret,
+            }
+        )
+
+    if res.status_code != 200:
+        raise HTTPException(status_code=res.status_code, detail="네이버 API 호출 실패")
+
+    data = res.json()
+    items = data.get("items", [])
+
+    # HTML 태그 제거
+    def strip_tags(text: str) -> str:
+        return re.sub(r'<[^>]+>', '', text)
+
+    articles = []
+    for item in items:
+        article = {
+            "title":       strip_tags(item.get("title", "")),
+            "url":         item.get("link", ""),
+            "source":      item.get("originallink", ""),
+            "description": strip_tags(item.get("description", "")),
+            "pub_date":    item.get("pubDate", ""),
+        }
+        articles.append(article)
+
+        # Supabase news_cache 테이블에 저장 (중복 무시)
+        try:
+            supabase.table("news_cache").upsert({
+                "url":         article["url"],
+                "title":       article["title"],
+                "description": article["description"],
+                "source":      urlparse(article["source"]).netloc.replace("www.", ""),
+                "pub_date":    article["pub_date"],
+                "query":       query,
+            }, on_conflict="url").execute()
+        except Exception as e:
+            print(f"[news_cache save error] {e}")
+
+    return {"ok": True, "query": query, "total": len(articles), "articles": articles}
+
+
+# ── 7. 유사 기사 검색 (네이버 기반) ──────────────────────
+@app.post("/api/similar/naver")
+async def find_similar_naver(req: SimilarRequest):
+    """키워드로 네이버 뉴스 검색해서 유사 기사 반환"""
+    # 키워드 최대 3개 조합
+    query = " ".join(req.keywords[:3]) if req.keywords else req.title[:40]
+
+    client_id     = os.getenv("NAVER_CLIENT_ID")
+    client_secret = os.getenv("NAVER_CLIENT_SECRET")
+
+    async with httpx.AsyncClient() as http:
+        res = await http.get(
+            "https://openapi.naver.com/v1/search/news.json",
+            params={"query": query, "display": 4, "sort": "sim"},
+            headers={
+                "X-Naver-Client-Id":     client_id,
+                "X-Naver-Client-Secret": client_secret,
+            }
+        )
+
+    if res.status_code != 200:
+        return {"ok": False, "data": {"articles": [], "verdict": "검색 실패"}}
+
+    items = res.json().get("items", [])
+
+    def strip_tags(t): return re.sub(r'<[^>]+>', '', t)
+
+    articles = [
+        {
+            "title":     strip_tags(i.get("title", "")),
+            "source":    urlparse(i.get("originallink", "")).netloc.replace("www.", ""),
+            "url":       i.get("link", ""),
+            "summary":   strip_tags(i.get("description", "")),
+            "pub_date":  i.get("pubDate", ""),
+        }
+        for i in items
+    ]
+
+    verdict = f"'{query}' 관련 유사 기사 {len(articles)}건을 발견했습니다." if articles \
+              else "유사 기사를 찾지 못했습니다."
+
+    return {"ok": True, "data": {"articles": articles, "verdict": verdict}}

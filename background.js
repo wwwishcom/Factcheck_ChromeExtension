@@ -48,7 +48,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "find_similar") {
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/similar`, {
+        const res = await fetch(`${API_BASE}/api/similar/naver`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: msg.title, keywords: msg.keywords || [] })
