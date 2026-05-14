@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "FF | Factcheck-Finger",
+  "version": "4.1",
+  "description": "뉴스 신뢰도 자동 검증 브라우저 확장 플랫폼",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "https://api.anthropic.com/*",
+    "http://localhost:8000/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": { "48": "icon48.png", "128": "icon128.png" }
+  },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["content.js"],
+    "css": ["styles.css"],
+    "run_at": "document_idle"
+  }]
+}
