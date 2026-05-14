@@ -17,7 +17,6 @@ function trustMeta(score) {
 // ── 아코디언 ───────────────────────────────────────────
 function bindAccordion() {
   document.querySelectorAll('.fc-head').forEach(head => {
-    // 중복 바인딩 방지
     if (head.dataset.bound) return;
     head.dataset.bound = '1';
     head.addEventListener('click', () => {
@@ -25,6 +24,40 @@ function bindAccordion() {
       const arrow = head.querySelector('.fc-arrow');
       const open  = body.classList.toggle('open');
       if (arrow) arrow.classList.toggle('open', open);
+
+      // 04 섹션 처음 열 때 네이버 유사 기사 검색
+      if (open && head.dataset.section === '04' && !head.dataset.loaded) {
+        head.dataset.loaded = '1';
+        const el = document.getElementById('ff-llm-04');
+        if (el) el.innerHTML = skeletonHTML(3);
+
+        chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+          chrome.tabs.sendMessage(tab.id, { action: 'get_article_info' }, (info) => {
+            chrome.runtime.sendMessage(
+              { action: 'find_similar', title: info?.title || '', keywords: info?.keywords || [] },
+              (res) => {
+                if (!el) return;
+                if (res?.ok && res.data?.articles?.length) {
+                  const articles = res.data.articles;
+                  el.innerHTML = `
+                    <div class="sub-txt" style="margin-top:4px;margin-bottom:8px">${res.data.verdict}</div>
+                    ${articles.map(a => `
+                      <div style="padding:7px 0;border-bottom:1px solid #f5f5f3">
+                        <div style="font-size:11px;font-weight:700;color:#0d1b2a;margin-bottom:3px;line-height:1.4">
+                          ${a.url ? `<a href="${a.url}" target="_blank" style="color:#003087;text-decoration:none">${a.title}</a>` : a.title}
+                        </div>
+                        <div style="font-size:10px;color:#8fa0b4;margin-bottom:3px">${a.source} · ${a.pub_date?.slice(0,16) || ''}</div>
+                        <div style="font-size:11px;color:#4a607a;line-height:1.5">${a.summary}</div>
+                      </div>`).join('')}
+                  `;
+                } else {
+                  el.innerHTML = `<div class="sub-txt" style="color:#8fa0b4">유사 기사를 찾지 못했습니다.</div>`;
+                }
+              }
+            );
+          });
+        });
+      }
     });
   });
 }
@@ -217,16 +250,16 @@ function renderResult(res, hasApiKey) {
       </div>
     </div>
 
-    <!-- 04 유사 기사 비교 (LLM) -->
+    <!-- 04 유사 기사 비교 (네이버) -->
     <div class="fc">
-      <div class="fc-head">
+      <div class="fc-head" data-section="04">
         <span class="fc-num">04</span><span class="fc-icon">🔗</span>
         <span class="fc-title">유사 기사 비교 · 출처 추적</span>
-        <span class="fc-badge bdg-b">${hasApiKey ? 'AI' : '베타'}</span>
+        <span class="fc-badge bdg-b">네이버</span>
         <span class="fc-arrow">▼</span>
       </div>
       <div class="fc-body">
-        <div id="ff-llm-04">${llmLoading}</div>
+        <div id="ff-llm-04"><div class="hint" style="padding:6px 0">▼ 클릭하면 유사 기사를 검색합니다</div></div>
       </div>
     </div>
 

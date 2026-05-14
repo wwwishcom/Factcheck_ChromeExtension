@@ -1,4 +1,3 @@
-
 (() => {
   // ============================================================
   //  A. 제목 / 본문 추출
@@ -406,5 +405,13 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === 'analyze') sendResponse(analyze());
+
+    // 팝업에서 유사 기사 검색할 때 현재 페이지 정보 반환
+    if (msg.action === 'get_article_info') {
+      const title    = getTitle();
+      const body     = getBody();
+      const keywords = extractKeywords(title).slice(0, 5).map(k => k.word);
+      sendResponse({ title, keywords });
+    }
   });
 })();
