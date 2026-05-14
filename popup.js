@@ -77,24 +77,23 @@ function applyLLMData(llm) {
     ? `<div class="summary-body">${llm.summary}</div>`
     : '<div class="summary-body" style="color:#8fa0b4">요약 불가</div>';
 
-  // 유사 기사 (04)
-  const sim04 = document.getElementById('ff-llm-04');
-  if (sim04) {
+  // 유사 기사 (04) — fact_claims/keywords는 별도 영역에만 표시
+  // 실제 유사 기사는 아코디언 클릭 시 find_similar로 채워짐
+  const claimsEl = document.getElementById('ff-llm-claims');
+  if (claimsEl) {
     const claims = llm.fact_claims || [];
     const kws    = llm.similar_keywords || [];
-    sim04.innerHTML = `
+    claimsEl.innerHTML = `
       ${claims.length ? `
-        <div class="tag-lbl">🔍 검증이 필요한 사실 주장</div>
+        <div class="tag-lbl" style="margin-top:8px">🔍 검증이 필요한 사실 주장</div>
         <div style="margin-top:4px">${claims.map(c =>
           `<div class="llm-claim"><span class="llm-claim-dot"></span>${c}</div>`).join('')}
         </div>` : ''}
       ${kws.length ? `
-        <div class="tag-lbl" style="margin-top:${claims.length?'10px':'4px'}">🔎 관련 검색어</div>
+        <div class="tag-lbl" style="margin-top:8px">🔎 관련 검색어</div>
         <div class="tag-row" style="margin-top:4px">
           ${kws.map(k => `<span class="tag blue">${k}</span>`).join('')}
-        </div>
-        <div class="llm-kw-note">위 키워드로 검색해 유사 기사를 직접 비교해 보세요.</div>` : ''}
-      ${!claims.length && !kws.length ? '<div class="sub-txt">분석된 주장이 없습니다.</div>' : ''}
+        </div>` : ''}
     `;
   }
 
@@ -259,7 +258,8 @@ function renderResult(res, hasApiKey) {
         <span class="fc-arrow">▼</span>
       </div>
       <div class="fc-body">
-        <div id="ff-llm-04"><div class="hint" style="padding:6px 0">▼ 클릭하면 유사 기사를 검색합니다</div></div>
+        <div id="ff-llm-04"><div class="hint" style="padding:6px 0;color:#8fa0b4;font-size:11px">▼ 클릭하면 유사 기사를 검색합니다</div></div>
+        <div id="ff-llm-claims"></div>
       </div>
     </div>
 

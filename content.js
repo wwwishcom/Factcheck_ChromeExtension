@@ -142,15 +142,20 @@
     if (sumEl && llm.summary) {
       sumEl.innerHTML = `<div style="font-size:11px;color:#4a607a;line-height:1.6">${llm.summary}</div>`;
     }
-    const el04 = document.querySelector('#ff-trust-badge #ff-b-04');
-    if (el04) {
+
+    // 04 — fact_claims/keywords는 별도 영역에 표시 (유사 기사는 클릭 시 채워짐)
+    const claimsEl = document.querySelector('#ff-trust-badge #ff-b-claims');
+    if (claimsEl) {
       const claims = llm.fact_claims || [];
       const kws    = llm.similar_keywords || [];
-      el04.innerHTML = `
-        ${claims.map(c => `<div style="font-size:10px;color:#4a607a;padding:3px 0;border-bottom:1px solid #f5f5f3">▪ ${c}</div>`).join('')}
-        ${kws.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:3px">${kws.map(k=>`<span style="font-size:10px;padding:2px 7px;border-radius:20px;background:#eef2fb;color:#003087;border:1px solid rgba(0,48,135,.2)">${k}</span>`).join('')}</div>` : ''}
-      ` || '<div style="font-size:10px;color:#8fa0b4">데이터 없음</div>';
+      claimsEl.innerHTML = `
+        ${claims.length ? `<div style="font-size:10px;color:#8fa0b4;margin:8px 0 3px">🔍 검증이 필요한 사실 주장</div>
+          ${claims.map(c => `<div style="font-size:10px;color:#4a607a;padding:3px 0;border-bottom:1px solid #f5f5f3">▪ ${c}</div>`).join('')}` : ''}
+        ${kws.length ? `<div style="font-size:10px;color:#8fa0b4;margin:8px 0 3px">🔎 관련 검색어</div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px">${kws.map(k=>`<span style="font-size:10px;padding:2px 7px;border-radius:20px;background:#eef2fb;color:#003087;border:1px solid rgba(0,48,135,.2)">${k}</span>`).join('')}</div>` : ''}
+      `;
     }
+
     const el05 = document.querySelector('#ff-trust-badge #ff-b-05');
     if (el05) {
       const terms = llm.terms || [];
@@ -299,16 +304,17 @@
             </div>
           </div>
 
-          <!-- 04 유사 기사 (LLM) -->
+          <!-- 04 유사 기사 (네이버 DB) -->
           <div class="ff-sec">
-            <div class="ff-sec-head">
+            <div class="ff-sec-head" data-section="04">
               <span class="ff-sec-num">04</span><span class="ff-sec-icon">🔗</span>
               <span class="ff-sec-title">유사 기사 비교 · 출처 추적</span>
-              <span class="ff-sec-badge ff-bdg-b">AI</span>
+              <span class="ff-sec-badge ff-bdg-b">네이버</span>
               <span class="ff-sec-arrow">▼</span>
             </div>
             <div class="ff-sec-body">
-              <div id="ff-b-04">${llmSkel}</div>
+              <div id="ff-b-04"><div style="font-size:10px;color:#8fa0b4;padding:4px 0">▼ 클릭하면 유사 기사를 검색합니다</div></div>
+              <div id="ff-b-claims"></div>
             </div>
           </div>
 
@@ -348,12 +354,43 @@
     // 아코디언 — isolated world이므로 addEventListener 직접 바인딩
     badge.querySelectorAll('.ff-sec-head').forEach(head => {
       head.addEventListener('click', (e) => {
-        // 닫기 버튼 클릭 이벤트 전파 방지
         if (e.target.classList.contains('ff-batt-close')) return;
         const body  = head.nextElementSibling;
         const arrow = head.querySelector('.ff-sec-arrow');
         const open  = body.classList.toggle('open');
         if (arrow) arrow.classList.toggle('open', open);
+
+        // 04 섹션 처음 열 때 네이버 유사 기사 검색
+        if (open && head.dataset.section === '04' && !head.dataset.loaded) {
+          head.dataset.loaded = '1';
+          const el = badge.querySelector('#ff-b-04');
+          if (el) el.innerHTML = '<div class="ff-skel"></div><div class="ff-skel" style="width:70%"></div>';
+
+          const title    = getTitle();
+          const keywords = extractKeywords(title).slice(0, 5).map(k => k.word);
+          chrome.runtime.sendMessage(
+            { action: 'find_similar', title, keywords },
+            (res) => {
+              if (!el) return;
+              if (res?.ok && res.data?.articles?.length) {
+                const articles = res.data.articles;
+                el.innerHTML = `
+                  <div style="font-size:10px;color:#4a607a;margin-bottom:6px">${res.data.verdict}</div>
+                  ${articles.map(a => `
+                    <div style="padding:6px 0;border-bottom:1px solid #f5f5f3">
+                      <div style="font-size:11px;font-weight:700;margin-bottom:2px;line-height:1.4">
+                        ${a.url ? `<a href="${a.url}" target="_blank" style="color:#003087;text-decoration:none">${a.title}</a>` : `<span style="color:#0d1b2a">${a.title}</span>`}
+                      </div>
+                      <div style="font-size:10px;color:#8fa0b4;margin-bottom:2px">${a.source} · ${a.pub_date?.slice(0,16)||''}</div>
+                      <div style="font-size:10px;color:#4a607a;line-height:1.5">${a.summary}</div>
+                    </div>`).join('')}
+                `;
+              } else {
+                el.innerHTML = `<div style="font-size:10px;color:#8fa0b4">유사 기사를 찾지 못했습니다.</div>`;
+              }
+            }
+          );
+        }
       });
     });
   }
