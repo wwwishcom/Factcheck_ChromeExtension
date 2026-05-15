@@ -177,6 +177,7 @@ FF-Factcheck-Finger/
 | GET | /api/test | 연결 상태 테스트 |
  
 <br>
+
 ## DB 스키마
  
 ### articles
@@ -209,11 +210,13 @@ FF-Factcheck-Finger/
 | created_at | TIMESTAMPTZ | 수집 시각 |
  
 <br>
+
 ## 수집 언론사
  
 연합뉴스, 네이버 뉴스 (정치/경제/사회/IT), 조선일보, 한겨레, MBC, KBS
  
 <br>
+
 ## 설치 및 실행
  
 ### Chrome 확장 설치
