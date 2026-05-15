@@ -197,6 +197,13 @@
       sumEl.innerHTML = `<div style="font-size:11px;color:#4a607a;line-height:1.6">${llm.summary}</div>`;
     }
 
+    // score_reason
+    const reasonEl = document.querySelector('#ff-trust-badge #ff-b-score-reason');
+    if (reasonEl && llm.score_reason) {
+      reasonEl.style.display = 'block';
+      reasonEl.innerHTML = `<span style="color:#003087;font-weight:600;margin-right:4px">AI 평가</span>${llm.score_reason}`;
+    }
+
     // 04 — fact_claims/keywords는 별도 영역에 표시 (유사 기사는 클릭 시 채워짐)
     const claimsEl = document.querySelector('#ff-trust-badge #ff-b-claims');
     if (claimsEl) {
@@ -224,7 +231,7 @@
   // ============================================================
   //  J. 배지 렌더링 v4.0 — 배터리 디자인
   // ============================================================
-  function renderBadge(title, cb, kw, w5, trust, bodyPreview) {
+  function renderBadge(title, cb, kw, w5, trust, bodyPreview, pubDate) {
     const existing = document.getElementById('ff-trust-badge');
     if (existing) existing.remove();
 
@@ -249,6 +256,16 @@
 
     const llmSkel = `<div class="ff-skel"></div><div class="ff-skel" style="width:70%"></div>`;
 
+    // 날짜 경고
+    const dateWarn = getDateWarning(pubDate);
+    const dateWarnHtml = dateWarn ? `
+      <div style="font-size:10px;padding:6px 10px;margin-bottom:6px;border-radius:6px;line-height:1.5;
+        ${dateWarn.level === 'warn'
+          ? 'color:#b45309;background:#fffbeb;border:1px solid rgba(180,83,9,.15)'
+          : 'color:#4a607a;background:#f4f6fb;border:1px solid #e4e8f0'}">
+        ${dateWarn.msg}
+      </div>` : '';
+
     const badge = document.createElement('div');
     badge.id = 'ff-trust-badge';
     badge.className = 'ff-collapsed';
@@ -266,7 +283,7 @@
       <!-- EXPANDED CARD -->
       <div class="ff-card" id="ff-card" style="display:none">
 
-        <!-- BATTERY HEADER -->
+        <!-- BATTERY HERO -->
         <div class="ff-batt-head" id="ff-card-close">
           <div class="ff-batt-top">
             <div>
@@ -288,10 +305,42 @@
             </div>
             <div class="ff-batt-nub"></div>
           </div>
+
+          <!-- 점수 산출 근거 (팝업과 동일) -->
+          <div style="background:#fff;padding:10px 14px;border-top:1px solid #f0f0ee">
+            <div style="font-size:10px;font-weight:700;color:#003087;margin-bottom:6px">점수 산출 근거</div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+              <span style="color:#4a607a">DB 일치율 <span style="color:#8fa0b4">× 50%</span></span>
+              <span style="font-weight:700;color:${w5c.c}">${trust.w5S}점</span>
+            </div>
+            <div style="height:3px;background:#f0f0ee;border-radius:2px;overflow:hidden;margin-bottom:4px">
+              <div style="height:100%;width:${trust.w5S}%;background:${w5c.c};border-radius:2px"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+              <span style="color:#4a607a">키워드 매칭률 <span style="color:#8fa0b4">× 30%</span></span>
+              <span style="font-weight:700;color:${kwc.c}">${trust.kwS}점</span>
+            </div>
+            <div style="height:3px;background:#f0f0ee;border-radius:2px;overflow:hidden;margin-bottom:4px">
+              <div style="height:100%;width:${trust.kwS}%;background:${kwc.c};border-radius:2px"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">
+              <span style="color:#4a607a">클릭베이트 방어 <span style="color:#8fa0b4">× 20%</span></span>
+              <span style="font-weight:700;color:${cbc.c}">${trust.cbS}점</span>
+            </div>
+            <div style="height:3px;background:#f0f0ee;border-radius:2px;overflow:hidden;margin-bottom:6px">
+              <div style="height:100%;width:${trust.cbS}%;background:${cbc.c};border-radius:2px"></div>
+            </div>
+            <div style="font-size:10px;color:#8fa0b4;text-align:center;padding-top:5px;border-top:1px solid #f0f0ee">
+              ${trust.w5S}×0.50 + ${trust.kwS}×0.30 + ${trust.cbS}×0.20 = <strong style="color:${trust.color}">${trust.total}점</strong>
+              ${trust.caseType === 'unmatched' ? '<span style="color:#b45309"> (DB 미확인)</span>' : ''}
+            </div>
+            <div id="ff-b-score-reason" style="margin-top:6px;padding:6px 8px;background:#f8f9fc;border-radius:6px;font-size:10px;color:#4a607a;line-height:1.6;display:none"></div>
+          </div>
         </div>
 
         <!-- BODY -->
         <div class="ff-card-body">
+          ${dateWarnHtml}
 
           <!-- 제목 -->
           <div class="ff-title-box">📰 ${title.slice(0, 110)}</div>
@@ -309,10 +358,24 @@
             </div>
           </div>
 
-          <!-- 01 육하원칙 -->
+          <!-- 01 유사 기사 -->
+          <div class="ff-sec">
+            <div class="ff-sec-head" data-section="04">
+              <span class="ff-sec-num">01</span><span class="ff-sec-icon">🔗</span>
+              <span class="ff-sec-title">유사 기사 비교 · 출처 추적</span>
+              <span class="ff-sec-badge ff-bdg-b">DB · 네이버</span>
+              <span class="ff-sec-arrow">▼</span>
+            </div>
+            <div class="ff-sec-body">
+              <div id="ff-b-04"><div style="font-size:10px;color:#8fa0b4;padding:4px 0">▼ 클릭하면 유사 기사를 검색합니다</div></div>
+              <div id="ff-b-claims"></div>
+            </div>
+          </div>
+
+          <!-- 02 육하원칙 -->
           <div class="ff-sec">
             <div class="ff-sec-head">
-              <span class="ff-sec-num">01</span><span class="ff-sec-icon">📋</span>
+              <span class="ff-sec-num">02</span><span class="ff-sec-icon">📋</span>
               <span class="ff-sec-title">육하원칙 기반 자동 검증</span>
               <span class="ff-sec-badge ${w5c.bdg}">${trust.cnt}/6</span>
               <span class="ff-sec-arrow">▼</span>
@@ -320,26 +383,8 @@
             <div class="ff-sec-body">
               <div id="ff-b-w5-db"></div>
               <div class="ff-bar"><div class="ff-bar-fill ${w5c.bar}" style="width:${trust.w5S}%"></div></div>
+              <div style="font-size:10px;color:#4a607a;margin:4px 0 6px">6항목을 크롤링 DB와 자동 대조해 정보 충실도를 평가합니다.</div>
               ${w5Html}
-            </div>
-          </div>
-
-          <!-- 02 신뢰도 점수 -->
-          <div class="ff-sec">
-            <div class="ff-sec-head">
-              <span class="ff-sec-num">02</span><span class="ff-sec-icon">🎯</span>
-              <span class="ff-sec-title">신뢰도 점수 즉시 표시</span>
-              <span class="ff-sec-badge" style="background:rgba(0,48,135,.07);color:#003087;border-color:rgba(0,48,135,.2)">${trust.total}점</span>
-              <span class="ff-sec-arrow">▼</span>
-            </div>
-            <div class="ff-sec-body">
-              <div style="display:flex;justify-content:space-between;font-size:10px;margin:6px 0 3px"><span style="color:#4a607a">육하원칙 <span style="color:#8fa0b4">×40%</span></span><span class="${w5c.cls}" style="font-weight:700">${trust.w5S}점</span></div>
-              <div class="ff-bar"><div class="ff-bar-fill ${w5c.bar}" style="width:${trust.w5S}%"></div></div>
-              <div style="display:flex;justify-content:space-between;font-size:10px;margin:4px 0 3px"><span style="color:#4a607a">키워드 매칭 <span style="color:#8fa0b4">×35%</span></span><span class="${kwc.cls}" style="font-weight:700">${trust.kwS}점</span></div>
-              <div class="ff-bar"><div class="ff-bar-fill ${kwc.bar}" style="width:${trust.kwS}%"></div></div>
-              <div style="display:flex;justify-content:space-between;font-size:10px;margin:4px 0 3px"><span style="color:#4a607a">클릭베이트 방어 <span style="color:#8fa0b4">×25%</span></span><span class="${cbc.cls}" style="font-weight:700">${trust.cbS}점</span></div>
-              <div class="ff-bar"><div class="ff-bar-fill ${cbc.bar}" style="width:${trust.cbS}%"></div></div>
-              <div class="ff-formula">${trust.w5S}×0.40 + ${trust.kwS}×0.35 + ${trust.cbS}×0.25 = <strong style="color:${trust.color}">${trust.total}점</strong></div>
             </div>
           </div>
 
@@ -359,24 +404,10 @@
             </div>
           </div>
 
-          <!-- 04 유사 기사 (네이버 DB) -->
-          <div class="ff-sec">
-            <div class="ff-sec-head" data-section="04">
-              <span class="ff-sec-num">04</span><span class="ff-sec-icon">🔗</span>
-              <span class="ff-sec-title">유사 기사 비교 · 출처 추적</span>
-              <span class="ff-sec-badge ff-bdg-b">네이버</span>
-              <span class="ff-sec-arrow">▼</span>
-            </div>
-            <div class="ff-sec-body">
-              <div id="ff-b-04"><div style="font-size:10px;color:#8fa0b4;padding:4px 0">▼ 클릭하면 유사 기사를 검색합니다</div></div>
-              <div id="ff-b-claims"></div>
-            </div>
-          </div>
-
-          <!-- 05 용어 풀이 (LLM) -->
+          <!-- 04 용어 풀이 (LLM) -->
           <div class="ff-sec">
             <div class="ff-sec-head">
-              <span class="ff-sec-num">05</span><span class="ff-sec-icon">📖</span>
+              <span class="ff-sec-num">04</span><span class="ff-sec-icon">📖</span>
               <span class="ff-sec-title">용어 풀이 · 경제 지표 연동</span>
               <span class="ff-sec-badge ff-bdg-b">AI</span>
               <span class="ff-sec-arrow">▼</span>
