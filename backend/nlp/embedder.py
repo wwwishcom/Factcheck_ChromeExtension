@@ -70,7 +70,7 @@ W5H_WEIGHTS = {
     'how':         0.03,
 }
 
-SIMILARITY_THRESHOLD = 0.65  # 같은 항목으로 판단하는 유사도 기준
+SIMILARITY_THRESHOLD = 0.45  # 같은 항목으로 판단하는 유사도 기준 (완화)
 
 def compare_5w1h(emb1: dict, emb2: dict) -> dict:
     """
@@ -106,10 +106,16 @@ def compare_5w1h(emb1: dict, emb2: dict) -> dict:
     if total_weight > 0:
         weighted_score = weighted_score / total_weight
 
-    # 같은 사건 판단: WHO + WHAT 둘 다 일치하거나, 전체 3개 이상 일치
+    # 같은 사건 판단: WHO 또는 WHAT 하나만 일치해도 되고, 전체 2개 이상 일치해도 됨
     who_match  = (details.get('who_agent', 0) or 0) >= SIMILARITY_THRESHOLD
     what_match = (details.get('what', 0) or 0) >= SIMILARITY_THRESHOLD
-    is_same_event = (who_match and what_match) or (match_count >= 3)
+    when_match = (details.get('when', 0) or 0) >= SIMILARITY_THRESHOLD
+    where_match = (details.get('where', 0) or 0) >= SIMILARITY_THRESHOLD
+    is_same_event = who_match or what_match or when_match or where_match or (match_count >= 2)
+
+    # 유효한 임베딩이 하나도 없으면 제목 키워드 기반으로 판단 불가
+    if total_weight == 0:
+        is_same_event = False
 
     return {
         'match_count':   match_count,

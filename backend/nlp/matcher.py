@@ -109,6 +109,24 @@ def find_similar_and_score(
             cand_emb = json.loads(cand['embeddings']) if isinstance(cand['embeddings'], str) else cand['embeddings']
             if not cand_emb:
                 continue
+
+            # 모든 임베딩이 null이면 제목 텍스트 임베딩으로 폴백
+            all_null = all(v is None for v in cand_emb.values())
+            if all_null:
+                from .embedder import embed
+                cand_title_vec = embed(cand.get('title', ''))
+                query_title_vec = embed(title)
+                sim = cosine_similarity(cand_title_vec, query_title_vec)
+                if sim >= 0.50:  # 제목 유사도 기준
+                    same_event_matches.append({
+                        'title':           cand['title'],
+                        'source':          cand['source'],
+                        'confirmed_count': cand.get('confirmed_count', 1),
+                        'comparison':      {'details': {'title_sim': sim}, 'weighted_score': sim * 100, 'is_same_event': True},
+                        'trust':           {'score': round(sim * 100), 'mismatch_items': [], 'match_items': ['title']},
+                    })
+                continue
+
             comparison = compare_5w1h(emb, cand_emb)
             if comparison['is_same_event']:
                 trust = calc_trust_from_match(comparison)

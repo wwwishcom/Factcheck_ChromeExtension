@@ -140,7 +140,7 @@ def extract_5w1h(text: str) -> dict:
         'where':     [],
         'why':       [],
         'how':       [],
-        'sentences': sentences[:10]  # 최대 10문장
+        'sentences': sentences[:5]  # 최대 5문장으로 줄여서 속도 향상
     }
 
     full_text = ' '.join(sentences[:10])
@@ -154,6 +154,31 @@ def extract_5w1h(text: str) -> dict:
     # 중복 제거
     result['who']['agent']   = list(dict.fromkeys(result['who']['agent']))[:5]
     result['who']['patient'] = list(dict.fromkeys(result['who']['patient']))[:5]
+
+    # 폴백: 조사 패턴으로 못 잡으면 인물/기관명 직접 추출
+    if not result['who']['agent'] and not result['who']['patient']:
+        okt = get_okt()
+        # 고유명사(Proper Noun) 추출
+        morphs = okt.pos(full_text[:300], norm=True)
+        proper_nouns = [w for w, p in morphs if p == 'Noun' and len(w) >= 2
+                        and not re.search(r'[0-9]', w)]
+        # 기관/인물 패턴
+        person_patterns = [
+            r'[가-힣]{2,4}(씨|씨가|씨는|대표|회장|장관|총리|대통령|의원|검사|판사|경찰|기자)',
+            r'[가-힣]{2,4}(?=이|가|은|는|께서)',
+        ]
+        org_patterns = [
+            r'[가-힣A-Za-z]+(?:부|처|청|원|회|단|사|그룹|연구소|대학|병원|기업|회사|위원회)',
+            r'[가-힣]+(전자|자동차|건설|금융|증권|보험|은행|방송|신문)',
+        ]
+        for p in person_patterns + org_patterns:
+            matches = re.findall(p, full_text[:500])
+            result['who']['agent'] += [m if isinstance(m, str) else m[0] for m in matches]
+        result['who']['agent'] = list(dict.fromkeys(result['who']['agent']))[:5]
+
+        # 그래도 없으면 고유명사 상위 3개
+        if not result['who']['agent']:
+            result['who']['agent'] = proper_nouns[:3]
 
     # ── WHEN: 시간 표현 ────────────────────────────────────
     for pattern in TIME_PATTERNS:
