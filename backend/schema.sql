@@ -58,3 +58,13 @@ ALTER TABLE news_cache DISABLE ROW LEVEL SECURITY;
 -- news_cache에 confirmed_count 추가 (여러 언론사에서 확인된 횟수)
 ALTER TABLE news_cache ADD COLUMN IF NOT EXISTS confirmed_count INTEGER DEFAULT 1;
 ALTER TABLE news_cache ADD COLUMN IF NOT EXISTS keywords TEXT DEFAULT '';
+
+-- ── pgvector 활성화 ──────────────────────────────────────
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- ── news_cache에 육하원칙 + 임베딩 컬럼 추가 ────────────
+ALTER TABLE news_cache ADD COLUMN IF NOT EXISTS w5h_data   JSONB DEFAULT '{}';
+ALTER TABLE news_cache ADD COLUMN IF NOT EXISTS embeddings JSONB DEFAULT '{}';
+
+-- 임베딩 벡터 검색용 인덱스 (나중에 pgvector로 고도화 가능)
+CREATE INDEX IF NOT EXISTS idx_news_cache_w5h ON news_cache USING GIN (w5h_data);

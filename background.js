@@ -127,7 +127,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function callClaudeDirectly(apiKey, title, body) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
     body: JSON.stringify({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1024,
