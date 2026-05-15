@@ -1,6 +1,6 @@
 """
-FF | Factcheck-Finger — FastAPI Backend v2.1
-RSS 크롤러 + 스케줄러 + DB 유사 기사 검색
+FF | Factcheck-Finger — FastAPI Backend v3.0
+RSS 크롤러 + NER/SRL + Word Embedding 기반 육하원칙 팩트체크
 """
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +14,9 @@ import os, json, re, traceback, httpx, feedparser
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from datetime import datetime
+
+# NLP 파이프라인 (lazy import — 서버 시작 느려지지 않게)
+import importlib
 
 load_dotenv()
 
@@ -127,8 +130,23 @@ async def crawl_rss():
                 except Exception:
                     pass
 
-                # 새 기사 insert
+                # insert 시도, 중복이면 무시
                 try:
+                    # NLP 처리 (육하원칙 추출 + 임베딩)
+                    w5h_data  = {}
+                    embeddings = {}
+                    try:
+                        from nlp.extractor import extract_5w1h, extract_keywords_for_embedding
+                        from nlp.embedder import embed_5w1h
+                        article_text = title + ' ' + summary
+                        w5h  = extract_5w1h(article_text)
+                        kw   = extract_keywords_for_embedding(w5h)
+                        embs = embed_5w1h(kw)
+                        w5h_data   = {k: v for k, v in w5h.items() if k != 'sentences'}
+                        embeddings = embs
+                    except Exception as nlp_e:
+                        print(f"[NLP 오류] {feed_info['source']}: {nlp_e}")
+
                     supabase.table("news_cache").insert({
                         "url":             url,
                         "title":           title[:300],
@@ -138,6 +156,8 @@ async def crawl_rss():
                         "query":           "",
                         "keywords":        kw,
                         "confirmed_count": 1,
+                        "w5h_data":        json.dumps(w5h_data,   ensure_ascii=False),
+                        "embeddings":      json.dumps(embeddings,  ensure_ascii=False),
                     }).execute()
                     total += 1
                 except Exception:
@@ -549,3 +569,24 @@ async def db_match(req: DbMatchRequest):
             "max_confirmed": 0,
             "comment": f"{'최신 기사 (' + pub_display + ') — ' if pub_display else ''}신뢰도 높은 언론사에서 아직 확인되지 않은 기사입니다. 내용을 추가로 확인하는 것을 권장합니다."
         }
+
+
+# ── 10. NLP 기반 육하원칙 DB 대조 ────────────────────────
+class NLPMatchRequest(BaseModel):
+    title: str
+    body: str
+
+@app.post("/api/nlp_match")
+async def nlp_match(req: NLPMatchRequest):
+    """
+    NER + Word Embedding 기반 육하원칙 DB 대조
+    - 같은 사건 판별 (WHO+WHAT 일치 or 3개 이상 일치)
+    - 불일치 항목으로 신뢰도 측정
+    """
+    try:
+        from nlp.matcher import find_similar_and_score
+        result = find_similar_and_score(supabase, req.title, req.body)
+        return {"ok": True, **result}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
