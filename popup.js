@@ -251,7 +251,7 @@ function renderResult(res, hasApiKey) {
         </div>
         <div style="font-size:11px;color:#8fa0b4;text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid #f0f0ee">
           ${t.w5S}×0.50 + ${t.kwS}×0.30 + ${t.cbS}×0.20 = <strong style="color:${tm.fillColor==='#4ade80'?'#16a34a':tm.fillColor}">${t.total}점</strong>
-          ${t.caseType === 'unmatched' ? '<span style="color:#b45309"> (최대 70점 상한 적용)</span>' : ''}
+          ${t.caseType === 'unmatched' ? '<span style="color:#b45309"> (DB 미확인 기사)</span>' : ''}
         </div>
         <!-- AI 점수 풀이 (LLM) -->
         <div id="ff-score-reason" style="margin-top:8px;padding:8px 10px;background:#f8f9fc;border-radius:8px;font-size:12px;color:#4a607a;line-height:1.6">${skeletonHTML(2)}</div>
@@ -265,10 +265,24 @@ function renderResult(res, hasApiKey) {
       <div id="ff-llm-summary">${llmLoading}</div>
     </div>
 
-    <!-- 01 육하원칙 -->
+    <!-- 01 유사 기사 비교 -->
+    <div class="fc">
+      <div class="fc-head" data-section="04">
+        <span class="fc-num">01</span><span class="fc-icon">🔗</span>
+        <span class="fc-title">유사 기사 비교 · 출처 추적</span>
+        <span class="fc-badge bdg-b">DB · 네이버</span>
+        <span class="fc-arrow">▼</span>
+      </div>
+      <div class="fc-body">
+        <div id="ff-llm-04"><div class="hint" style="padding:6px 0;color:#8fa0b4;font-size:11px">▼ 클릭하면 유사 기사를 검색합니다</div></div>
+        <div id="ff-llm-claims"></div>
+      </div>
+    </div>
+
+    <!-- 02 육하원칙 -->
     <div class="fc">
       <div class="fc-head">
-        <span class="fc-num">01</span><span class="fc-icon">📋</span>
+        <span class="fc-num">02</span><span class="fc-icon">📋</span>
         <span class="fc-title">육하원칙 기반 자동 검증</span>
         <span class="fc-badge ${w5c.badge}">${t.cnt}/6 항목</span>
         <span class="fc-arrow">▼</span>
@@ -284,7 +298,7 @@ function renderResult(res, hasApiKey) {
     <!-- 03 클릭베이트 -->
     <div class="fc">
       <div class="fc-head">
-        <span class="fc-num">02</span><span class="fc-icon">🎣</span>
+        <span class="fc-num">03</span><span class="fc-icon">🎣</span>
         <span class="fc-title">클릭베이트 감지</span>
         <span class="fc-badge ${cbRc.badge}">${cb.reasons.length ? cb.reasons.length+'개 감지' : '이상 없음'}</span>
         <span class="fc-arrow">▼</span>
@@ -300,21 +314,7 @@ function renderResult(res, hasApiKey) {
       </div>
     </div>
 
-    <!-- 04 유사 기사 비교 (네이버) -->
-    <div class="fc">
-      <div class="fc-head" data-section="04">
-        <span class="fc-num">03</span><span class="fc-icon">🔗</span>
-        <span class="fc-title">유사 기사 비교 · 출처 추적</span>
-        <span class="fc-badge bdg-b">네이버</span>
-        <span class="fc-arrow">▼</span>
-      </div>
-      <div class="fc-body">
-        <div id="ff-llm-04"><div class="hint" style="padding:6px 0;color:#8fa0b4;font-size:11px">▼ 클릭하면 유사 기사를 검색합니다</div></div>
-        <div id="ff-llm-claims"></div>
-      </div>
-    </div>
-
-    <!-- 05 용어 풀이 (LLM) -->
+    <!-- 04 용어 풀이 (LLM) -->
     <div class="fc">
       <div class="fc-head">
         <span class="fc-num">04</span><span class="fc-icon">📖</span>

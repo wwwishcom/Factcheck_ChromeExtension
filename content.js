@@ -147,8 +147,8 @@
       caseType = 'matched';
       comment  = null;
     } else {
-      // 케이스 2 — DB 미매칭: kw×50% + cb×50%, 최대 70점
-      total    = Math.min(70, Math.round(kwS * 0.50 + cbS * 0.50));
+      // 케이스 2 — DB 미매칭: kw×60% + cb×40%, 최대 85점
+      total    = Math.min(85, Math.round(kwS * 0.60 + cbS * 0.40));
       caseType = 'unmatched';
       comment  = '신뢰도 높은 언론사에서 아직 확인되지 않은 기사입니다. 추가 확인을 권장합니다.';
     }

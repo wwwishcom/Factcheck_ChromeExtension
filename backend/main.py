@@ -521,48 +521,78 @@ class DbMatchRequest(BaseModel):
 async def db_match(req: DbMatchRequest):
     """
     신뢰도 있는 언론사 DB와 대조해 신뢰도 점수 산출
-    - 매칭 있음: DB 일치율 기반 점수 (최대 100)
-    - 매칭 없음: 최신 기사 판정, 최대 70점 상한 적용
+    news_cache + articles 두 테이블 모두 검색
     """
-    keyword = req.keywords[0] if req.keywords else req.title[:20]
+    keywords = req.keywords[:3] if req.keywords else [req.title[:15]]
 
-    # DB에서 유사 기사 검색
     db_articles = []
-    try:
-        res = supabase.table("news_cache")\
-            .select("title, source, confirmed_count, pub_date")\
-            .ilike("title", f"%{keyword}%")\
-            .order("confirmed_count", desc=True)\
-            .limit(5).execute()
-        db_articles = res.data or []
-    except Exception as e:
-        print(f"[db_match 오류] {e}")
+
+    for kw in keywords:
+        if not kw or len(kw) < 2:
+            continue
+        # news_cache 검색
+        try:
+            res = supabase.table("news_cache")\
+                .select("title, source, confirmed_count, pub_date")\
+                .ilike("title", f"%{kw}%")\
+                .order("confirmed_count", desc=True)\
+                .limit(5).execute()
+            db_articles += res.data or []
+        except Exception as e:
+            print(f"[db_match news_cache 오류] {e}")
+
+        # articles 테이블도 검색 (분석 이력)
+        try:
+            res2 = supabase.table("articles")\
+                .select("title, domain")\
+                .ilike("title", f"%{kw}%")\
+                .limit(5).execute()
+            for a in (res2.data or []):
+                db_articles.append({
+                    "title":           a.get("title",""),
+                    "source":          a.get("domain",""),
+                    "confirmed_count": 1,
+                    "pub_date":        ""
+                })
+        except Exception as e:
+            print(f"[db_match articles 오류] {e}")
+
+    # 중복 제거
+    seen = set()
+    unique = []
+    for a in db_articles:
+        t = a.get("title","")
+        if t and t not in seen:
+            seen.add(t)
+            unique.append(a)
+
+    db_articles = unique
 
     if db_articles:
-        # 확인된 언론사 수
         sources = list({a.get("source","") for a in db_articles if a.get("source")})
         source_count = len(sources)
-        # 가장 높은 confirmed_count
         max_confirmed = max(a.get("confirmed_count") or 1 for a in db_articles)
+        article_count = len(db_articles)
 
-        # 점수 계산: 기본 50 + 언론사 수 보너스 + 중복 확인 보너스
-        db_score = min(100, 50 + (source_count * 15) + min(max_confirmed * 5, 20))
+        # 점수: 기사 발견 수 + 언론사 다양성 + 중복 확인 보너스
+        db_score = min(100, 40 + (article_count * 5) + (source_count * 10) + min(max_confirmed * 3, 15))
 
         return {
             "ok": True,
-            "case": "matched",          # DB 매칭 케이스
+            "case": "matched",
             "db_score": db_score,
             "source_count": source_count,
             "sources": sources,
+            "article_count": article_count,
             "max_confirmed": max_confirmed,
-            "comment": None             # 주의 코멘트 없음
+            "comment": None
         }
     else:
-        # DB 미매칭 → 최대 70점 상한, 주의 코멘트
+        # DB 미매칭 → 주의 코멘트만, 70점 상한 제거
         pub_display = req.pub_date[:10] if req.pub_date else ""
         return {
             "ok": True,
-            "case": "unmatched",        # DB 미매칭 케이스
+            "case": "unmatched",
             "db_score": None,
             "source_count": 0,
             "sources": [],
