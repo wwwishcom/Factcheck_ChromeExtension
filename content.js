@@ -510,47 +510,62 @@
         });
       }
 
-      // DB 매칭 점수 계산
+      // DB 매칭 점수 계산 — 섹션 코멘트만 업데이트, 점수는 유지
       chrome.runtime.sendMessage(
         { action: 'db_match', title, keywords, pubDate },
         (dbRes) => {
           if (!dbRes?.ok) return;
-
-          const dbScore = dbRes.case === 'matched' ? dbRes.db_score : null;
-          const newTrust = calcTrust(cb, kw, w5, dbScore);
-
-          // 배지 점수 업데이트
-          updateBadgeScore(newTrust, dbRes, pubDate);
+          // 점수는 재계산하지 않고 코멘트/주의문구만 업데이트
+          if (dbRes.case === 'unmatched' && dbRes.comment) {
+            const badge = document.getElementById('ff-trust-badge');
+            if (!badge) return;
+            let commentEl = badge.querySelector('#ff-trust-comment');
+            if (!commentEl) {
+              commentEl = document.createElement('div');
+              commentEl.id = 'ff-trust-comment';
+              commentEl.style.cssText = 'font-size:10px;color:#b45309;background:#fffbeb;border-radius:6px;padding:7px 10px;margin-bottom:6px;line-height:1.5;border:1px solid rgba(180,83,9,.15)';
+              const cardBody = badge.querySelector('.ff-card-body');
+              if (cardBody) cardBody.insertBefore(commentEl, cardBody.firstChild);
+            }
+            commentEl.textContent = '⚠ ' + dbRes.comment;
+          }
 
           // LLM 분석
           if (ff_api_key) {
             chrome.runtime.sendMessage({ action: 'llm_analyze', title, body: bodyRaw }, (res) => {
+              if (chrome.runtime.lastError) return;
               if (res?.ok) applyLLMToBadge(res.data);
             });
           }
         }
       );
 
-      // verify5w (01 섹션)
-      chrome.runtime.sendMessage(
-        { action: 'verify5w', title, body: bodyRaw, pubDate, keywords },
-        (res) => {
-          if (!res?.ok) return;
-          const el = document.querySelector('#ff-trust-badge #ff-b-w5-db');
-          if (!el) return;
-          if (res.method === 'db') {
-            el.innerHTML = `
-              <div style="font-size:10px;background:#eef2fb;border-radius:6px;padding:6px 8px;margin-bottom:6px;color:#003087">
-                DB 대조 완료 — ${res.db_sources.join(', ')} 등 ${res.db_count}건 비교
-                ${res.pub_date ? `<span style="color:#8fa0b4;margin-left:6px">${res.pub_date}</span>` : ''}
-              </div>
-              ${renderW5Comparison(res.comparison)}
-            `;
-          } else {
-            el.innerHTML = `<div style="font-size:10px;color:#b45309;background:#fffbeb;border-radius:6px;padding:6px 8px;margin-bottom:6px">${res.reason}</div>`;
+      // NLP 육하원칙 DB 대조 — fire-and-forget (응답 오래 걸려도 에러 없음)
+      const nlpEl = document.querySelector('#ff-trust-badge #ff-b-w5-db');
+      if (nlpEl) nlpEl.innerHTML = `<div style="font-size:10px;color:#8fa0b4;padding:4px 0">NLP 분석 중...</div>`;
+      setTimeout(() => {
+        chrome.runtime.sendMessage(
+          { action: 'nlp_match', title, body: bodyRaw },
+          (res) => {
+            if (chrome.runtime.lastError) return;
+            const el = document.querySelector('#ff-trust-badge #ff-b-w5-db');
+            if (!el || !res?.ok) return;
+            if (res.case === 'matched' && res.matches?.length) {
+              const top = res.matches[0];
+              const sources = res.sources?.join(', ') || '';
+              el.innerHTML = `
+                <div style="font-size:10px;background:#eef2fb;border-radius:6px;padding:6px 8px;margin-bottom:6px;color:#003087">
+                  DB 대조 완료 — ${sources} 등 ${res.matches.length}건 비교
+                  <span style="color:#8fa0b4;margin-left:6px">NER + Word Embedding</span>
+                </div>
+                ${renderW5Comparison(res.matches[0].comparison?.details || {})}
+              `;
+            } else {
+              el.innerHTML = `<div style="font-size:10px;color:#b45309;background:#fffbeb;border-radius:6px;padding:6px 8px;margin-bottom:6px">${res.comment || 'DB에서 동일 사건 기사를 찾지 못했습니다.'}</div>`;
+            }
           }
-        }
-      );
+        );
+      }, 500);
     });
 
     return { title, cb, kw, w5, trust, bodyPreview, bodyRaw, pubDate };

@@ -1,8 +1,21 @@
-/* ─── FF | Factcheck-Finger · background.js · v4.1 ─── */
+/* ─── FF | Factcheck-Finger · background.js · v4.2 ─── */
 
 const API_BASE = "http://localhost:8000";
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+  // ── NLP 육하원칙 DB 대조 → /api/nlp_match (fire-and-forget) ──
+  if (msg.action === "nlp_match") {
+    fetch(`${API_BASE}/api/nlp_match`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: msg.title || "", body: msg.body || "" })
+    })
+    .then(r => r.json())
+    .then(json => { try { sendResponse({ ok: true, ...json }); } catch(e) {} })
+    .catch(() => { try { sendResponse({ ok: false }); } catch(e) {} });
+    return true;
+  }
 
   // ── LLM 분석 → 백엔드 /api/analyze ──────────────────
   if (msg.action === "llm_analyze") {

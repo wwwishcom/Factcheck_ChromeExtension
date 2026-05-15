@@ -33,9 +33,11 @@ function bindAccordion() {
 
         chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
           chrome.tabs.sendMessage(tab.id, { action: 'get_article_info' }, (info) => {
+            if (chrome.runtime.lastError) return;
             chrome.runtime.sendMessage(
               { action: 'find_similar', title: info?.title || '', keywords: info?.keywords || [] },
               (res) => {
+                if (chrome.runtime.lastError) return;
                 if (!el) return;
                 if (res?.ok && res.data?.articles?.length) {
                   const articles = res.data.articles;
@@ -379,31 +381,14 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
 
     if (!res || res.error) return;
 
-    // verify5w — DB 대조 육하원칙 검증
-    chrome.runtime.sendMessage(
-      { action: 'verify5w', title: res.title, body: res.bodyRaw || '', pubDate: res.pubDate || '', keywords: res.kw?.matched?.slice(0,5) || [] },
-      (v5) => {
-        const el = document.getElementById('ff-w5-db');
-        if (!el || !v5?.ok) return;
-        if (v5.method === 'db') {
-          el.innerHTML = `
-            <div style="font-size:11px;background:#eef2fb;border-radius:7px;padding:7px 10px;margin-bottom:8px;color:#003087">
-              DB 대조 완료 — ${v5.db_sources.join(', ')} 등 ${v5.db_count}건 비교
-              ${v5.pub_date ? `<span style="color:#8fa0b4;margin-left:6px;font-size:10px">${v5.pub_date}</span>` : ''}
-            </div>
-            ${renderW5Compare(v5.comparison)}
-          `;
-        } else {
-          el.innerHTML = `<div style="font-size:11px;color:#b45309;background:#fffbeb;border-radius:7px;padding:7px 10px;margin-bottom:8px">${v5.reason || 'DB 미등록 기사입니다.'}</div>`;
-        }
-      }
-    );
+    // nlp_match는 배지에서만 처리 (팝업에서는 제거 — 응답 지연으로 채널 오류 발생)
 
     // LLM 분석
     if (ff_api_key) {
       chrome.runtime.sendMessage(
         { action: 'llm_analyze', title: res.title, body: res.bodyRaw || res.title },
         (llmRes) => {
+          if (chrome.runtime.lastError) return;
           if (llmRes?.ok) applyLLMData(llmRes.data);
           else {
             const errHtml = `<div class="sub-txt" style="color:#dc2626">⚠ ${llmRes?.message || 'LLM 분석 실패'}</div>`;
