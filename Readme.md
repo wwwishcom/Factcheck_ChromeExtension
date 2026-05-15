@@ -12,7 +12,7 @@
 
 LLM은 요약 및 논리 검증에만 사용하고, 데이터 가공 및 조회에는 NER, SRL, Word Embedding 기반 기술을 사용합니다.
 
-![FactcheckFinger 포스터](Factcheck poster.png)
+![FactcheckFinger 포스터](Factcheck_poster.png)
 
 <br>
 
